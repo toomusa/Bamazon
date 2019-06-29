@@ -3,7 +3,7 @@ var mysql = require("mysql");
 var fs = require("fs");
 var inquirer = require("inquirer");
 var keys = require("./keys.js");
-const cTable = require('console.table');
+const cTable = require("console.table");
 
 var connection = mysql.createConnection({
     host: "localhost",
@@ -18,14 +18,19 @@ let departmentOptions = [];
 let departments = [];
 let items = {};
 let productPick;
-let itemsInCart = {}; // reset this after purchase
+let itemsInCart = {}; 
+let productSearch = [];
+let createObj = {};
+let purchaseHistory = {};
+let mainData;
 
-connection.connect(function(err) {
+const connectDB = () => {
+    connection.connect(function(err) {
     if (err) throw err;
     console.log("Connection ID is " + connection.threadId);
     seeItems();
-    // connection.end();
-});
+    });
+}
 
 const seeItems = () => {
     connection.query(`SELECT item_id AS "Item #", product_name AS "Product",
@@ -33,6 +38,7 @@ const seeItems = () => {
                     concat(stock_quantity, ' units') AS "In Stock" FROM products`, async (err, data) => {
         if (err) throw err;
         console.table("\x1b[37m", data);
+        mainData = data;
         createList(data);
         await buyProduct();
     })
@@ -44,7 +50,7 @@ const createList = (data) => {
         items[itemID] = `Item ${data[key]["Item #"]}: ${data[key]["Product"]} | Price: $${data[key]["Price"]}`;
         departments.push(data[key]["Department"]);
         departmentOptions = Array.from(new Set(departments));
-    }
+    } 
     itemOptions = Object.values(items);
 };
 
@@ -67,144 +73,151 @@ const askRetry = () => {
             return buyProduct();
         } else {
             console.log("Thanks, come again!");
-            return;
+            return connection.end();
         }
     })
 };
-
-
 
 const buyProduct = () => {
-    new Promise ((resolve, reject) => {
-        inquirer.prompt([
-            {
-                type: "list",
-                name: "itemBuy",
-                message: "What would you like to purchase today?",
-                choices: [...itemOptions]
-            },
-            {
-                type: "number",
-                name: "quantityBuy",
-                message: "How many would you like?"
-            },
-            {
-                type: "confirm",
-                name: "buyMore",
-                message: "Would you like to add anything else?",
-                default: false
-            },
-        ]).then((res) => {
-            processOrder(res);
-        })
-        resolve();
-    })
-}
-
-const processOrder = async (res) => {
-    if (res.buyMore) {
-        itemsInCart[res.quantityBuy] = res.itemBuy;
-        buyProduct();    
-    } else {
-        itemsInCart[res.quantityBuy] = res.itemBuy;
-        findProduct(res);
-        connection.query(`SELECT product_name, department_name, price, stock_quantity 
-                            FROM products WHERE item_id = ?`, [productPick], (err, data) => {
-            if (err) throw err;
-            console.log("YOUR CART");
-            console.table("\x1b[37m", data);
-            if (res.quantityBuy > data[0].stock_quantity) {
-                askRetry();
-            } else {
-                console.log("Program Buy Product");
-                console.log(itemsInCart);
-                connection.end();
-            }
-        })
-    }
-};
-
-       
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// The app should then prompt users with two messages.
-
-// The first should ask them the ID of the product they would like to buy.
-// The second message should ask how many units of the product they would like to buy.
-
-
-
-// Once the customer has placed the order, your application should check if your store has enough of the product to meet the customer's request.
-
-// If not, the app should log a phrase like Insufficient quantity!, and then prevent the order from going through.
-
-
-
-// However, if your store does have enough of the product, you should fulfill the customer's order.
-
-// This means updating the SQL database to reflect the remaining quantity.
-// Once the update goes through, show the customer the total cost of their purchase.
-
-
-
-
-const addNewProduct = () => {
-    inquierer.prompt([
+    return inquirer.prompt([
         {
             type: "list",
-            name: "department",
-            message: "Which department does the new product belong to?",
-            choices: [...departmentOptions]
-        },
-        {
-            type: "input",
-            name: "item",
-            message: "Enter the name of the item:"
-        },
-        {
-            type: "number",
-            name: "price",
-            message: "How much does it cost? (enter dollar and cents)"
-        },
-        {
-            type: "number",
-            name: "quantity",
-            message: "How many are we adding to the inventory?"
-        }
-    ]).then(function (err, res) {
-        if (err) throw err;
-        console.log(res);
-    });
-};
-
-
-const addToInventory = () => {
-    inquirer.prompt([
-        {
-            type: "list",
-            name: "selection",
-            message: "Which items would you like to replanish?",
+            name: "itemBuy",
+            message: "What would you like to purchase today?",
             choices: [...itemOptions]
         },
         {
             type: "number",
-            name: "added",
-            message: "How many are we adding to the inventory?"
+            name: "quantityBuy",
+            message: "How many would you like?",
+            validate: function(answer){
+                const valid = !isNaN(answer);
+                return valid;
+            },
+        },
+        {
+            type: "confirm",
+            name: "buyMore",
+            message: "Would you like to add anything else?",
+            default: false
+        },
+    ])
+    .then((res) => {processOrder(res)})
+    .catch((error) => {console.error(error)})
+}
+
+const queryVariables = (res) => {
+    let itemNumber = res.itemBuy.slice(5, 7).replace(":", " ").trim();
+    (itemsInCart[itemNumber]) ? itemsInCart[itemNumber] += res.quantityBuy : itemsInCart[itemNumber] = res.quantityBuy;
+    console.log("CART: " + JSON.stringify(itemsInCart))
+    findProduct(res);
+    createObj.item_id = parseInt(productPick);
+    productSearch.push(createObj);
+    createObj = {};
+}
+
+const processOrder = async (res) => {
+    let goodOrder = false;
+    mainData.forEach(item => {
+        itemNumber = parseInt(res.itemBuy.slice(5, 7).replace(":", " ").trim());
+        currentStock = parseInt(item["In Stock"].slice(0, -6).trim());
+        if (item["Item #"] === itemNumber && res.quantityBuy < currentStock) {goodOrder = true}
+    });
+    if (!goodOrder) {
+        return askRetry();
+    } else if (res.buyMore) {
+        queryVariables(res);
+        buyProduct();    
+        } else {
+        queryVariables(res);
+        let questionMark = "?";
+        for (let i = 0; i < productSearch.length - 1; i++) {questionMark += " OR ?"}
+        var query = `SELECT item_id AS "Item #", product_name AS "Product", department_name AS "Department", 
+                    concat('$', format(price, 2)) AS "Price", concat(stock_quantity, ' units') AS "In Stock"
+                    FROM products WHERE ${questionMark}`;
+
+        connection.query(query, [...productSearch], (err, data) => {
+            if (err) throw err;
+            const newData = data.map(item => {
+                item['Quantity'] = itemsInCart[ item['Item #'] ];
+                return item;
+            })
+            console.table("\x1b[37m", newData); 
+            console.log("The items above are in your cart");
+            inquirer.prompt([
+                {
+                    type: "confirm",
+                    name: "shopMore", 
+                    message: "Would you like to finalize your purchase?",
+                    default: true
+                },
+            ]).then((response) => {(response.shopMore) ? completePurchase(newData) : buyProduct();
+            }).catch((error) => {console.error(error)})
+        })
+    }
+}
+
+
+const completePurchase = (newData) => {
+    let totalCost = 0;
+    for (let key in newData) {
+        newData[key]["In Stock"] = parseInt(newData[key]["In Stock"].slice(0, -6).trim()) - newData[key]["Quantity"];
+        newData[key]["In Stock"] += " units"; 
+        totalCost += (parseInt(newData[key]["Quantity"])) * (parseInt(newData[key]["Price"].replace("$", " ").trim()))
+    }
+    console.log("Congratulations on your purchase!")
+    console.log("Your total cost is $" + totalCost.toFixed(2))
+    resetVars();
+    inquirer.prompt([ 
+        {
+            type: "confirm",
+            name: "shopAgain",
+            message: "Would you like to shop again?",
+            default: false
+        },
+    ]).then((res) => {
+        if (res.shopAgain) {
+            seeItems();
+        } else {
+            console.log("Thanks, come again!"); 
+            connection.end()
         }
-    ]).then(function(err, res){
-        if (err) throw err;
-        console.log(`Item: ${res.selection}, Added: ${res.added}, New Inventory Total: `);
-    })
-};
+    }).catch((error) => {console.error(error)})
+}
+
+const resetVars = () => {
+    itemOptions = [];
+    departmentOptions = [];
+    departments = [];
+    items = {};
+    productPick;
+    itemsInCart = {}; 
+    productSearch = [];
+    createObj = {};
+    mainData = {};
+    newData = {};
+    totalCost = 0;
+}
+
+module.exports = {
+    itemOptions,
+    departmentOptions,
+    departments,
+    items,
+    productPick,
+    itemsInCart,
+    productSearch,
+    createObj,
+    mainData,
+
+    connectDB,
+    seeItems,
+    createList,
+    findProduct,
+    askRetry,
+    buyProduct,
+    queryVariables,
+    processOrder,
+    completePurchase,
+    resetVars
+}
