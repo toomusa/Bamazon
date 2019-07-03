@@ -1,6 +1,5 @@
 
 var mysql = require("mysql");
-var fs = require("fs");
 var inquirer = require("inquirer");
 var keys = require("./keys.js");
 const cTable = require("console.table");
@@ -23,28 +22,15 @@ let productSearch = [];
 let createObj = {};
 let purchaseHistory = {};
 let mainData;
-let purchase = [];
-let updateItemString = (stock, sales, quantity, id) => 
-    `UPDATE products SET stock_quantity = ${stock}, product_sales = ${sales}, sold_quantity = ${quantity} WHERE item_id = ${id};`
+
+// Support Functions
 
 const connectDB = () => {
     connection.connect(function(err) {
     if (err) throw err;
-    console.log("Connection ID is " + connection.threadId);
+    console.log("\nCUSTOMER PORTAL\n");
     seeItems();
     });
-}
-
-const seeItems = () => {
-    connection.query(`SELECT item_id AS "Item #", product_name AS "Product",
-                    department_name AS "Department", concat('$', format(price, 2)) AS "Price",
-                    concat(stock_quantity, ' units') AS "In Stock" FROM products`, async (err, data) => {
-        if (err) throw err;
-        console.table("\x1b[37m", data);
-        mainData = data;
-        createList(data);
-        await buyProduct();
-    })
 }
 
 const createList = (data) => {
@@ -65,8 +51,17 @@ const findProduct = (res) => {
     }
 }
 
+const queryVariables = (res) => {
+    let itemNumber = res.itemBuy.slice(5, 7).replace(":", " ").trim();
+    (itemsInCart[itemNumber]) ? itemsInCart[itemNumber] += res.quantityBuy : itemsInCart[itemNumber] = res.quantityBuy;
+    findProduct(res);
+    createObj.item_id = parseInt(productPick);
+    productSearch.push(createObj);
+    createObj = {};
+}
+
 const askRetry = () => {
-    console.log("Sorry, we don't have that many in stock.");
+    console.log("\nSorry, we don't have that many in stock\n");
     inquirer.prompt([{
         type: "confirm",
         name: "retry",
@@ -75,11 +70,25 @@ const askRetry = () => {
         if (res.retry) {
             return buyProduct();
         } else {
-            console.log("Thanks, come again!");
+            console.log("\nThanks, come again!\n");
             return connection.end();
         }
     })
 };
+
+// Main Functions
+
+const seeItems = () => {
+    connection.query(`SELECT item_id AS "Item #", product_name AS "Product",
+                    department_name AS "Department", concat('$', format(price, 2)) AS "Price",
+                    concat(stock_quantity, ' units') AS "In Stock" FROM products`, async (err, data) => {
+        if (err) throw err;
+        console.table("\x1b[37m\nITEMS IN STOCK", data);
+        mainData = data;
+        createList(data);
+        await buyProduct();
+    })
+}
 
 const buyProduct = () => {
     return inquirer.prompt([
@@ -109,16 +118,6 @@ const buyProduct = () => {
     .catch((error) => {console.error(error)})
 }
 
-const queryVariables = (res) => {
-    let itemNumber = res.itemBuy.slice(5, 7).replace(":", " ").trim();
-    (itemsInCart[itemNumber]) ? itemsInCart[itemNumber] += res.quantityBuy : itemsInCart[itemNumber] = res.quantityBuy;
-    console.log("CART: " + JSON.stringify(itemsInCart))
-    findProduct(res);
-    createObj.item_id = parseInt(productPick);
-    productSearch.push(createObj);
-    createObj = {};
-}
-
 const processOrder = async (res) => {
     let goodOrder = false;
     mainData.forEach(item => {
@@ -138,15 +137,13 @@ const processOrder = async (res) => {
         var query = `SELECT item_id AS "Item #", product_name AS "Product", department_name AS "Department", 
                     concat('$', format(price, 2)) AS "Price", concat(stock_quantity, ' units') AS "In Stock"
                     FROM products WHERE ${questionMark}`;
-
-        connection.query(query, [...productSearch], (err, data) => {
+        connection.query(query, [...productSearch], async (err, data) => {
             if (err) throw err;
-            const newData = data.map(item => {
+            const newData = await data.map(item => {
                 item['Quantity'] = itemsInCart[item['Item #']];
                 return item;
             })
-            console.table("\x1b[37m", newData); 
-            console.log("The items above are in your cart");
+            console.table("\x1b[37m\nYOUR CART", newData); 
             inquirer.prompt([
                 {
                     type: "confirm",
@@ -160,50 +157,16 @@ const processOrder = async (res) => {
     }
 }
 
-/**
- * newData is the cart with quantity ordered column added (array of objects)
- * 
- * loop through newData, find by item_id, calculate (stock_quantity - quantity), 
- * 
- *  add quantity to sold_quantity / calc sold_quantity
- * 
- *  add (quantity * price) to product_sales
- * 
- * 
- * Loop over data and update each item in DB
- * 
- *  query update db with new stock, sold_quantity, product_sales
- * 
- *  itemData = newData.map( item => {
- *  let newStock, totalSales;
- *  newStock = item["In Stock"] - item["Quantity"]
- *  totalSales = item["Price"] * item["Quantity"]
- *  totalCost += totalSales
- *  return { id: item.id, newStock, totalSales, quantity: item["Quantity"] }
- * })
- * [{ id: item.id, newStock, totalSales, quantity: item["Quantity"] },]
- * 
- * calc total cost of purchase
- * 
- * itemData.map( item => db.updateItem(item))
- * 
- * updateItem(item) {
- *  // database sql query
- * }
- * 
- */
 
 function updateItemInDatabase(itemObj) {
     return new Promise((resolve, reject) => {
-
-        connection.query(updateItemString(itemObj.newStock, itemObj.totalSales, itemObj.quantity, itemObj.id), (err, data) => {
-            if(err) {
-                return reject();
-            }
-
+        let updateItemString = (stock, sales, quantity, id) => 
+            `UPDATE products SET stock_quantity = ${stock}, product_sales = ${sales}, sold_quantity = ${quantity} WHERE item_id = ${id};`;
+        let query = updateItemString(itemObj.newStock, itemObj.totalSales, itemObj.quantity, itemObj.id)
+        connection.query(query, (err, data) => {
+            if(err) return reject();
             return resolve(data);
         })
-
     })
 }
 
@@ -216,10 +179,9 @@ const completePurchase = async (newData) => {
         totalCost += totalSales
         return { id: item["Item #"], newStock, totalSales, quantity: item["Quantity"] }
     })
-    const promises = itemData.map( item => updateItemInDatabase(item) );
-    await Promise.all( promises )
-    console.log("Congratulations on your purchase!")
-    console.log("Your total cost is $" + totalCost.toFixed(2))
+    await Promise.all(itemData.map(item => updateItemInDatabase(item))).catch((error) => {throw error});
+    console.log("\nCongratulations on your purchase!")
+    console.log("\nYour total cost is $" + totalCost.toFixed(2) + "\n")
     resetVars();
     inquirer.prompt([ 
         {
@@ -232,7 +194,7 @@ const completePurchase = async (newData) => {
         if (res.shopAgain) {
             seeItems();
         } else {
-            console.log("Thanks, come again!"); 
+            console.log("\nThanks, come again!\n"); 
             connection.end()
         }
     }).catch((error) => {console.error(error)})
@@ -253,24 +215,5 @@ const resetVars = () => {
 }
 
 module.exports = {
-    itemOptions,
-    departmentOptions,
-    departments,
-    items,
-    productPick,
-    itemsInCart,
-    productSearch,
-    createObj,
-    mainData,
-
-    connectDB,
-    seeItems,
-    createList,
-    findProduct,
-    askRetry,
-    buyProduct,
-    queryVariables,
-    processOrder,
-    completePurchase,
-    resetVars
+    connectDB
 }

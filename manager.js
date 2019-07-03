@@ -2,14 +2,9 @@
 var inquirer = require("inquirer");
 var keys = require("./keys.js");
 var mysql = require("mysql");
-
-var fs = require("fs");
-var customer = require("./customer.js");
-var supervisor = require("./supervisor.js");
 const cTable = require("console.table");
 
 let mainData;
-let lowInventory;
 let itemOptions = [];
 let departmentOptions = [];
 let departments = [];
@@ -25,6 +20,17 @@ var connection = mysql.createConnection({
     database: "bamazon_db"
 });
 
+// "Behind the Scenes" Functions
+
+const connectDB = () => {
+    connection.connect(function(err) {
+    if (err) throw err;
+    console.log("\nMANAGER PORTAL\n");
+    queryDB();
+    managerPortal();
+    });
+}
+
 const queryDB = () => {
     return new Promise((resolve, reject) => {
         connection.query(`SELECT item_id AS "Item #", product_name AS "Product",
@@ -36,16 +42,6 @@ const queryDB = () => {
             resolve();
         })
     })
-}
-
-const connectDB = () => {
-    connection.connect(function(err) {
-    if (err) throw err;
-    console.log("Connection ID is " + connection.threadId);
-    console.log("Manager Portal");
-    queryDB();
-    managerPortal();
-    });
 }
 
 const createList = (data) => {
@@ -71,24 +67,7 @@ const findProduct = (response) => {
     }
 }
 
-
-// List a set of menu options:
-// View Products for Sale
-// View Low Inventory
-// Add to Inventory
-// Add New Product
-
-
-// If a manager selects View Products for Sale, the app should list every 
-// available item: the item IDs, names, prices, and quantities.
-
-// If a manager selects View Low Inventory, then it should list all items 
-// with an inventory count lower than five.
-// If a manager selects Add to Inventory, your app should display a prompt 
-// that will let the manager "add more" of any item currently in the store.
-
-// If a manager selects Add New Product, it should allow the manager to 
-// add a completely new product to the store.
+// Main Functions
 
 const managerPortal = () => {
     inquirer.prompt([
@@ -96,7 +75,7 @@ const managerPortal = () => {
             type: "list",
             name: "managerAction",
             message: "What would you like to do?",
-            choices: ["View Products", "View Low Inventory", "Add to Inventory", "Add a New Product"]
+            choices: ["View Products", "View Low Inventory", "Add to Inventory", "Add a New Product", "Exit Manager Portal"]
         }
     ]).then((res) => {
         switch (res.managerAction) {
@@ -104,8 +83,8 @@ const managerPortal = () => {
             case "View Low Inventory": viewLowInventory(); break; 
             case "Add to Inventory": addToInventory(); break; 
             case "Add a New Product": addNewProduct(); break; 
-            case "That's all for now":
-                console.log("Thanks for checking in");
+            case "Exit Manager Portal":
+                console.log("\nThanks for checking in\n");
                 connection.end();
                 break;
         }
@@ -113,7 +92,7 @@ const managerPortal = () => {
 };
 
 const viewProducts = () => {
-    console.table("\x1b[37m", mainData);
+    console.table("\x1b[37m\nPRODUCTS", mainData);
     managerPortal();
 };
 
@@ -123,8 +102,8 @@ const viewLowInventory = () => {
     concat(stock_quantity, ' units') AS "In Stock" FROM products WHERE stock_quantity <= ?`, 
     [10], (err, data) => {
     if (err) throw err;
-    (Object.entries(data).length !== 0) ? console.table("\x1b[37m", data) : console.log("\nThere are no items with less than 5 quantity in stock\n");
-    lowInventory = data;
+    (Object.entries(data).length !== 0) ? console.table("\x1b[37m\nLOW INVENTORY", data) : 
+                                        console.log("\nThere are no items with less than 5 quantity in stock\n");
     managerPortal();
     })
 };
@@ -134,7 +113,7 @@ const addToInventory = () => {
         {
             type: "list",
             name: "selection",
-            message: "Which items would you like to replanish?",
+            message: "Which items would you like to replenish?",
             choices: [...itemOptions]
         },
         {
@@ -149,24 +128,19 @@ const addToInventory = () => {
     ]).then((response) => {
         findProduct(response)
         let newStock = response.added + currentStock;
-        console.log("NEW STOCK: " + newStock)
-        console.log("LOW INVENTORY ITEM ID: " + itemNumber) 
         connection.query(`UPDATE products SET stock_quantity = ? WHERE item_id = ?`, 
             [newStock, itemNumber], async (err, data) => {
             if (err) throw err;
             await queryDB();
-            console.log(`Item: ${response.selection}, Added: ${response.added}`);
             const updatedItem = mainData.filter(item => {
-                console.log(item)
-                console.log("Line 163: " + item["Item #"])
                 return parseInt(item["Item #"]) === parseInt(itemNumber)
             })
-            console.log(`New Inventory Total: ${updatedItem[0]["In Stock"]}`)
+            console.log(`\nItem: ${response.selection}, Added: ${response.added}`);
+            console.log(`\nNew Inventory Total: ${updatedItem[0]["In Stock"]}\n`)
             managerPortal();
         });
     }).catch(err => console.error(err))
 }
-
 
 const addNewProduct = () => {
     inquirer.prompt([
@@ -200,27 +174,19 @@ const addNewProduct = () => {
             }
         }
     ]).then(function (res) {
-        console.log(res);
         let query = `INSERT INTO products (product_name, department_name, price, stock_quantity)
                     VALUES ("${res.item}", "${res.department}", ${res.price}, ${res.quantity})`
-        console.log(query)
-        connection.query(query, (err, data) => {
-            if (err) throw err;
-            console.log(data.affectedRows)
-            connection.query(`SELECT * FROM products WHERE product_name = "${res.item}"`, (err, data) => {
-                if (err) throw err;
-                console.table(data)
+            connection.query(query, (err, data) => {
+                if (err) throw (err);
+                connection.query(`SELECT * FROM products WHERE product_name = "${res.item}"`, (err, data) => {
+                    if (err) throw (err);
+                    console.table("\nNEW PRODUCT", data)
+                    managerPortal()
+                })
             })
-        managerPortal();
-        })
     }).catch((err) => console.error(err));
 };
 
-
 module.exports = {
-    connectDB,
-    viewProducts,
-    viewLowInventory,
-    addNewProduct,
-    addToInventory
+    connectDB
 }

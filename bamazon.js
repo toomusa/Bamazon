@@ -3,8 +3,7 @@ var manager = require("./manager.js");
 var supervisor = require("./supervisor.js");
 var inquirer = require("inquirer");
 
-
-console.log("Welcome to Bamazon!")
+console.log("\nWELCOME TO BAMAZON\N")
 
 inquirer.prompt([
     {

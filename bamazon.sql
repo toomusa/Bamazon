@@ -11,7 +11,7 @@ CREATE TABLE products (
     price DECIMAL (10,2) NOT NULL,
     stock_quantity INTEGER (5) NOT NULL,
     product_sales DECIMAL (10,2) NULL DEFAULT 0,
-    sold_quanity INTEGER (5) Null DEFAULT 0 
+    sold_quantity INTEGER (5) Null DEFAULT 0,
     PRIMARY KEY (item_id)
 );
 
@@ -33,4 +33,19 @@ VALUES
 ("Fancy Sneakers", "Clothing", 50.00, 10),
 ("Leather Belt", "Clothing", 20.00, 30);
 
+CREATE TABLE departments (
+    department_id INTEGER (5) AUTO_INCREMENT NOT NULL,
+    department_name VARCHAR (100) NOT NULL,
+    over_head_costs DECIMAL (10,2) NOT NULL,
+    PRIMARY KEY (department_id)
+);
+
+INSERT INTO departments (department_name, over_head_costs)
+VALUES 
+("Electronics", 1000.00),
+("Foods", 500.00),
+("Clothing", 700.00);
+
 SELECT * FROM products;
+
+SELECT * FROM departments;
