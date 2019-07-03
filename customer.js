@@ -23,6 +23,9 @@ let productSearch = [];
 let createObj = {};
 let purchaseHistory = {};
 let mainData;
+let purchase = [];
+let updateItemString = (stock, sales, quantity, id) => 
+    `UPDATE products SET stock_quantity = ${stock}, product_sales = ${sales}, sold_quantity = ${quantity} WHERE item_id = ${id};`
 
 const connectDB = () => {
     connection.connect(function(err) {
@@ -139,7 +142,7 @@ const processOrder = async (res) => {
         connection.query(query, [...productSearch], (err, data) => {
             if (err) throw err;
             const newData = data.map(item => {
-                item['Quantity'] = itemsInCart[ item['Item #'] ];
+                item['Quantity'] = itemsInCart[item['Item #']];
                 return item;
             })
             console.table("\x1b[37m", newData); 
@@ -157,14 +160,64 @@ const processOrder = async (res) => {
     }
 }
 
+/**
+ * newData is the cart with quantity ordered column added (array of objects)
+ * 
+ * loop through newData, find by item_id, calculate (stock_quantity - quantity), 
+ * 
+ *  add quantity to sold_quantity / calc sold_quantity
+ * 
+ *  add (quantity * price) to product_sales
+ * 
+ * 
+ * Loop over data and update each item in DB
+ * 
+ *  query update db with new stock, sold_quantity, product_sales
+ * 
+ *  itemData = newData.map( item => {
+ *  let newStock, totalSales;
+ *  newStock = item["In Stock"] - item["Quantity"]
+ *  totalSales = item["Price"] * item["Quantity"]
+ *  totalCost += totalSales
+ *  return { id: item.id, newStock, totalSales, quantity: item["Quantity"] }
+ * })
+ * [{ id: item.id, newStock, totalSales, quantity: item["Quantity"] },]
+ * 
+ * calc total cost of purchase
+ * 
+ * itemData.map( item => db.updateItem(item))
+ * 
+ * updateItem(item) {
+ *  // database sql query
+ * }
+ * 
+ */
 
-const completePurchase = (newData) => {
+function updateItemInDatabase(itemObj) {
+    return new Promise((resolve, reject) => {
+
+        connection.query(updateItemString(itemObj.newStock, itemObj.totalSales, itemObj.quantity, itemObj.id), (err, data) => {
+            if(err) {
+                return reject();
+            }
+
+            return resolve(data);
+        })
+
+    })
+}
+
+const completePurchase = async (newData) => {
     let totalCost = 0;
-    for (let key in newData) {
-        newData[key]["In Stock"] = parseInt(newData[key]["In Stock"].slice(0, -6).trim()) - newData[key]["Quantity"];
-        newData[key]["In Stock"] += " units"; 
-        totalCost += (parseInt(newData[key]["Quantity"])) * (parseInt(newData[key]["Price"].replace("$", " ").trim()))
-    }
+    const itemData = newData.map(item => {
+        let newStock, totalSales;
+        newStock = parseInt(item["In Stock"].slice(0, -6).trim()) - item["Quantity"]
+        totalSales = parseInt(item["Price"].replace("$", " ").trim()) * item["Quantity"]
+        totalCost += totalSales
+        return { id: item["Item #"], newStock, totalSales, quantity: item["Quantity"] }
+    })
+    const promises = itemData.map( item => updateItemInDatabase(item) );
+    await Promise.all( promises )
     console.log("Congratulations on your purchase!")
     console.log("Your total cost is $" + totalCost.toFixed(2))
     resetVars();
